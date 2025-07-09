@@ -1,344 +1,136 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import streamlit as st
+import io
+import base64
+from datetime import datetime
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+# --- Configuration for Firestore (Conceptual - for actual deployment) ---
+# To connect to Firestore in a deployed Streamlit app (e.g., Streamlit Cloud):
+# 1. Go to your Firebase project settings -> Service accounts.
+# 2. Generate a new private key and download the JSON file.
+# 3. In your Streamlit app's secrets (e.g., .streamlit/secrets.toml), add the content
+#    of this JSON file under a key like 'firestore_credentials'.
+# 4. Then, you would use the google-cloud-firestore library like this:
+#
+# from google.cloud import firestore
+#
+# @st.cache_resource
+# def get_firestore_client():
+#     # Initialize Firestore DB client using credentials from st.secrets
+#     # This assumes you've saved your service account key in st.secrets.toml
+#     # under a key like 'firestore_credentials'
+#     try:
+#         key_dict = json.loads(st.secrets["firestore_credentials"])
+#         db = firestore.Client.from_service_account_info(key_dict)
+#         return db
+#     except Exception as e:
+#         st.error(f"Error initializing Firestore: {e}")
+#         return None
+#
+# db = get_firestore_client()
+#
+# For this demonstration, we will use st.session_state for temporary storage.
 
-function App() {
-  const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [capturedImageBlob, setCapturedImageBlob] = useState(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
-  const [images, setImages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [cameraActive, setCameraActive] = useState(false);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+# --- App Title and Description ---
+st.set_page_config(layout="centered")
 
-  useEffect(() => {
-    try {
-      const app = initializeApp(firebaseConfig);
-      const authInstance = getAuth(app);
-      const firestoreInstance = getFirestore(app);
+st.title("Live Camera Image Storage (Streamlit)")
+st.write("Capture photos from your webcam and see them displayed below.")
+st.write("Note: For persistent storage in a deployed app, you would integrate with a database like Firestore.")
 
-      setAuth(authInstance);
-      setDb(firestoreInstance);
+# --- User ID Display (Conceptual for multi-user) ---
+# In a real multi-user Streamlit app, you'd manage user sessions and IDs
+# more robustly, possibly with external authentication.
+# For this example, we'll use a placeholder or a simple session ID.
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = "user_" + base64.urlsafe_b64encode(io.BytesIO(str(datetime.now()).encode()).read()).decode()[:8]
 
-      const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-        if (user) {
-          setUserId(user.uid);
-          setIsAuthReady(true);
-        } else {
-          try {
-            if (initialAuthToken) {
-              await signInWithCustomToken(authInstance, initialAuthToken);
-            } else {
-              await signInAnonymously(authInstance);
-            }
-          } catch (error) {
-            console.error("Firebase authentication error:", error);
-            setMessage(`Authentication failed: ${error.message}`);
-          }
-        }
-      });
+st.markdown(f"Your (temporary) User ID: `{st.session_state.user_id}`")
+st.markdown("*(This ID is unique to your current session and for demonstration purposes only.)*")
 
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Firebase initialization error:", error);
-      setMessage(`Firebase initialization failed: ${error.message}`);
-    }
-  }, []);
+st.markdown("---")
 
-  useEffect(() => {
-    if (isAuthReady && db && userId) {
-      const imagesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/camera_images`);
-      const q = query(imagesCollectionRef, orderBy('timestamp', 'desc'));
+# --- Camera Input Section ---
+st.header("Capture a Photo")
+captured_image_file = st.camera_input("Take a picture")
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedImages = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setImages(fetchedImages);
-        setMessage('');
-      }, (error) => {
-        console.error("Error fetching images:", error);
-        setMessage(`Error fetching images: ${error.message}`);
-      });
+if captured_image_file:
+    st.image(captured_image_file, caption="Captured Image Preview", use_column_width=True)
 
-      return () => unsubscribe();
-    }
-  }, [isAuthReady, db, userId]);
+    if st.button("Save Image (Temporary Session Storage)"):
+        # Read image bytes
+        image_bytes = captured_image_file.getvalue()
 
-  const startCamera = async () => {
-    setLoading(true);
-    setMessage('Starting camera...');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setCameraActive(true);
-        setMessage('Camera active.');
-      }
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      setMessage(`Error accessing camera: ${err.message}. Please allow camera access.`);
-      setCameraActive(false);
-    } finally {
-      setLoading(false);
-    }
-  };
+        # Convert to Base64 for easier storage if needed (e.g., in a JSON-compatible DB field)
+        # For direct file storage, you might upload bytes to cloud storage (e.g., S3, GCS)
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
 
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-    setCameraActive(false);
-    setCapturedImageBlob(null);
-    setImagePreviewUrl(null);
-    setMessage('');
-  };
+        # Store in session state (temporary)
+        if 'saved_images' not in st.session_state:
+            st.session_state.saved_images = []
 
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
+        st.session_state.saved_images.append({
+            'id': str(datetime.now().timestamp()), # Unique ID for this image
+            'image_b64': base64_image,
+            'timestamp': datetime.now().isoformat()
+        })
+        st.success("Image saved to session!")
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+        # --- Firestore Integration (Conceptual - for actual deployment) ---
+        # if db: # If Firestore client is initialized
+        #     try:
+        #         images_collection_ref = db.collection(f"artifacts/{st.session_state.app_id}/users/{st.session_state.user_id}/camera_images")
+        #         images_collection_ref.add({
+        #             'image_b64': base64_image,
+        #             'timestamp': firestore.SERVER_TIMESTAMP,
+        #             'userId': st.session_state.user_id,
+        #         })
+        #         st.success("Image saved to Firestore!")
+        #     except Exception as e:
+        #         st.error(f"Error saving image to Firestore: {e}")
+        # else:
+        #     st.warning("Firestore client not initialized. Image saved to session only.")
 
-      const context = canvas.getContext('2d');
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+st.markdown("---")
 
-      canvas.toBlob((blob) => {
-        if (blob) {
-          setCapturedImageBlob(blob);
-          setImagePreviewUrl(URL.createObjectURL(blob));
-          setMessage('Photo captured!');
-        } else {
-          setMessage('Failed to capture photo.');
-        }
-      }, 'image/jpeg', 0.9);
-    }
-  };
+# --- Display Saved Pictures ---
+st.header("My Saved Pictures (Current Session)")
 
-  const saveImageToFirestore = async () => {
-    if (!capturedImageBlob) {
-      setMessage('Please capture a photo first.');
-      return;
-    }
-    if (!db || !userId) {
-      setMessage('Database not ready. Please wait or refresh.');
-      return;
-    }
+if 'saved_images' in st.session_state and st.session_state.saved_images:
+    # Display images in reverse order (most recent first)
+    for i, img_data in enumerate(reversed(st.session_state.saved_images)):
+        st.subheader(f"Picture taken on: {datetime.fromisoformat(img_data['timestamp']).strftime('%Y-%m-%d %H:%M:%S')}")
+        st.image(base64.b64decode(img_data['image_b64']), use_column_width=True)
 
-    setLoading(true);
-    setMessage('Saving image...');
+        if st.button(f"Delete Picture {i+1}", key=f"delete_{img_data['id']}"):
+            # Remove from session state
+            st.session_state.saved_images = [
+                img for img in st.session_state.saved_images if img['id'] != img_data['id']
+            ]
+            st.success("Image deleted from session!")
+            st.experimental_rerun() # Rerun to update the display
 
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(capturedImageBlob);
-      reader.onloadend = async () => {
-        const base64Image = reader.result;
+        st.markdown("---")
+else:
+    st.info("No pictures saved in this session yet.")
 
-        const imagesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/camera_images`);
-        await addDoc(imagesCollectionRef, {
-          image_b64: base64Image,
-          timestamp: serverTimestamp(),
-          userId: userId,
-        });
-
-        setMessage('Image saved successfully!');
-        setCapturedImageBlob(null);
-        setImagePreviewUrl(null);
-        stopCamera();
-      };
-      reader.onerror = (error) => {
-        console.error("Error reading image file:", error);
-        setMessage(`Error reading image: ${error.message}`);
-        setLoading(false);
-      };
-
-    } catch (error) {
-      console.error("Error saving image to Firestore:", error);
-      setMessage(`Error saving image: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deleteImageFromFirestore = async (imageId) => {
-    if (!db || !userId) {
-      setMessage('Database not ready. Cannot delete.');
-      return;
-    }
-
-    setLoading(true);
-    setMessage('Deleting image...');
-
-    try {
-      const imageDocRef = doc(db, `artifacts/${appId}/users/${userId}/camera_images`, imageId);
-      await deleteDoc(imageDocRef);
-      setMessage('Image deleted successfully!');
-    } catch (error) {
-      console.error("Error deleting image from Firestore:", error);
-      setMessage(`Error deleting image: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-purple-200 p-4 sm:p-6 font-sans flex flex-col items-center">
-      <div className="bg-white rounded-xl shadow-lg p-6 sm:p-8 w-full max-w-2xl">
-        <h1 className="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-6">
-          Live Camera Image Storage
-        </h1>
-        <p className="text-center text-gray-600 mb-6">
-          Capture and store your moments securely in the cloud!
-        </p>
-
-        {userId && (
-          <p className="text-sm text-gray-500 text-center mb-4">
-            Your User ID: <span className="font-mono break-all">{userId}</span>
-          </p>
-        )}
-
-        <div className="flex flex-col items-center space-y-4 mb-8">
-          {!cameraActive ? (
-            <button
-              onClick={startCamera}
-              disabled={loading}
-              className={`w-full sm:w-auto px-8 py-3 rounded-lg font-semibold transition duration-300 ease-in-out
-                ${loading
-                  ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600 text-white shadow-md transform hover:scale-105'
-                }`}
-            >
-              {loading ? 'Starting Camera...' : 'Start Camera'}
-            </button>
-          ) : (
-            <>
-              <video ref={videoRef} className="w-full max-w-md rounded-lg shadow-md border-2 border-gray-300" autoPlay playsInline muted></video>
-              <canvas ref={canvasRef} className="hidden"></canvas>
-              <div className="flex space-x-4">
-                <button
-                  onClick={capturePhoto}
-                  disabled={loading}
-                  className={`px-8 py-3 rounded-lg font-semibold transition duration-300 ease-in-out
-                    ${loading
-                      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                      : 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-md transform hover:scale-105'
-                    }`}
-                >
-                  Capture Photo
-                </button>
-                <button
-                  onClick={stopCamera}
-                  disabled={loading}
-                  className={`px-8 py-3 rounded-lg font-semibold transition duration-300 ease-in-out
-                    ${loading
-                      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                      : 'bg-red-500 hover:bg-red-600 text-white shadow-md transform hover:scale-105'
-                    }`}
-                >
-                  Stop Camera
-                </button>
-              </div>
-            </>
-          )}
-
-          {imagePreviewUrl && (
-            <div className="mt-4 border-2 border-gray-300 rounded-lg overflow-hidden shadow-md">
-              <img
-                src={imagePreviewUrl}
-                alt="Captured Preview"
-                className="max-w-full h-auto rounded-md"
-                style={{ maxHeight: '300px' }}
-              />
-            </div>
-          )}
-
-          <button
-            onClick={saveImageToFirestore}
-            disabled={!capturedImageBlob || loading || !isAuthReady}
-            className={`w-full sm:w-auto px-8 py-3 rounded-lg font-semibold transition duration-300 ease-in-out
-              ${!capturedImageBlob || loading || !isAuthReady
-                ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                : 'bg-green-500 hover:bg-green-600 text-white shadow-md transform hover:scale-105'
-              }`}
-          >
-            {loading ? 'Saving...' : 'Save Image to Cloud'}
-          </button>
-        </div>
-
-        {message && (
-          <p className={`text-center text-sm ${message.includes('Error') ? 'text-red-500' : 'text-green-600'} mt-4`}>
-            {message}
-          </p>
-        )}
-
-        <hr className="my-8 border-t-2 border-gray-200" />
-
-        <h2 className="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-6">
-          My Saved Pictures
-        </h2>
-
-        {loading && images.length === 0 && (
-          <p className="text-center text-gray-500">Loading images...</p>
-        )}
-
-        {images.length === 0 && !loading && (
-          <p className="text-center text-gray-500">No images saved yet. Take one!</p>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {images.map((img) => (
-            <div key={img.id} className="bg-gray-50 rounded-lg shadow-md overflow-hidden flex flex-col">
-              <img
-                src={img.image_b64}
-                alt={`Saved ${img.id}`}
-                className="w-full h-48 object-cover rounded-t-lg"
-                onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/400x300/CCCCCC/000000?text=Image+Error"; }}
-              />
-              <div className="p-4 flex-grow flex flex-col justify-between">
-                <div>
-                  <p className="text-sm text-gray-60-0 mb-2">
-                    {img.timestamp ? new Date(img.timestamp.toDate()).toLocaleString() : 'Saving...'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => deleteImageFromFirestore(img.id)}
-                  disabled={loading}
-                  className={`mt-3 w-full py-2 px-4 rounded-md font-semibold transition duration-300 ease-in-out
-                    ${loading
-                      ? 'bg-red-300 text-gray-600 cursor-not-allowed'
-                      : 'bg-red-500 hover:bg-red-600 text-white shadow-sm transform hover:scale-105'
-                    }`}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default App;
+# --- Firestore Display (Conceptual - for actual deployment) ---
+# if db:
+#     st.header("My Saved Pictures (from Firestore)")
+#     try:
+#         images_collection_ref = db.collection(f"artifacts/{st.session_state.app_id}/users/{st.session_state.user_id}/camera_images")
+#         docs = images_collection_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).stream()
+#         firestore_images = []
+#         for doc in docs:
+#             firestore_images.append(doc.to_dict())
+#
+#         if firestore_images:
+#             for img_data in firestore_images:
+#                 st.subheader(f"Picture taken on: {img_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+#                 st.image(base64.b64decode(img_data['image_b64']), use_column_width=True)
+#                 # Add delete functionality for Firestore images too
+#                 # This would involve calling a delete function that uses db.collection(...).document(...).delete()
+#                 st.markdown("---")
+#         else:
+#             st.info("No pictures found in Firestore for this user.")
+#     except Exception as e:
+#         st.error(f"Error fetching images from Firestore: {e}")
