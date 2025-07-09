@@ -3,7 +3,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 
-// Global variables provided by the Canvas environment
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -13,16 +12,15 @@ function App() {
   const [auth, setAuth] = useState(null);
   const [userId, setUserId] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [capturedImageBlob, setCapturedImageBlob] = useState(null); // Stores the captured image as a Blob
-  const [imagePreviewUrl, setImagePreviewUrl] = useState(null); // Stores URL for preview
-  const [images, setImages] = useState([]); // Stores fetched images from Firestore
+  const [capturedImageBlob, setCapturedImageBlob] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [cameraActive, setCameraActive] = useState(false); // State to manage camera stream
-  const videoRef = useRef(null); // Reference to the video element for live stream
-  const canvasRef = useRef(null); // Reference to the canvas element for capturing photos
+  const [cameraActive, setCameraActive] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
 
-  // 1. Initialize Firebase and handle authentication
   useEffect(() => {
     try {
       const app = initializeApp(firebaseConfig);
@@ -32,13 +30,11 @@ function App() {
       setAuth(authInstance);
       setDb(firestoreInstance);
 
-      // Listen for authentication state changes
       const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
         if (user) {
           setUserId(user.uid);
           setIsAuthReady(true);
         } else {
-          // If no user, try to sign in with custom token or anonymously
           try {
             if (initialAuthToken) {
               await signInWithCustomToken(authInstance, initialAuthToken);
@@ -52,18 +48,16 @@ function App() {
         }
       });
 
-      return () => unsubscribe(); // Cleanup auth listener on component unmount
+      return () => unsubscribe();
     } catch (error) {
       console.error("Firebase initialization error:", error);
       setMessage(`Firebase initialization failed: ${error.message}`);
     }
   }, []);
 
-  // 2. Fetch images from Firestore once authenticated
   useEffect(() => {
     if (isAuthReady && db && userId) {
       const imagesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/camera_images`);
-      // Order by timestamp to show most recent first
       const q = query(imagesCollectionRef, orderBy('timestamp', 'desc'));
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -72,22 +66,20 @@ function App() {
           ...doc.data()
         }));
         setImages(fetchedImages);
-        setMessage(''); // Clear any previous messages
+        setMessage('');
       }, (error) => {
         console.error("Error fetching images:", error);
         setMessage(`Error fetching images: ${error.message}`);
       });
 
-      return () => unsubscribe(); // Cleanup snapshot listener
+      return () => unsubscribe();
     }
   }, [isAuthReady, db, userId]);
 
-  // Function to start camera stream
   const startCamera = async () => {
     setLoading(true);
     setMessage('Starting camera...');
     try {
-      
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -104,7 +96,6 @@ function App() {
     }
   };
 
-  // Function to stop camera stream
   const stopCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
       videoRef.current.srcObject.getTracks().forEach(track => track.stop());
@@ -116,20 +107,17 @@ function App() {
     setMessage('');
   };
 
-  // Capture photo from video stream
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      // Set canvas dimensions to match video
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Get image data from canvas as Blob
       canvas.toBlob((blob) => {
         if (blob) {
           setCapturedImageBlob(blob);
@@ -138,11 +126,10 @@ function App() {
         } else {
           setMessage('Failed to capture photo.');
         }
-      }, 'image/jpeg', 0.9); // Save as JPEG with 90% quality
+      }, 'image/jpeg', 0.9);
     }
   };
 
-  // Save the captured image Blob to Firestore
   const saveImageToFirestore = async () => {
     if (!capturedImageBlob) {
       setMessage('Please capture a photo first.');
@@ -158,21 +145,21 @@ function App() {
 
     try {
       const reader = new FileReader();
-      reader.readAsDataURL(capturedImageBlob); // Reads as Base64 string
+      reader.readAsDataURL(capturedImageBlob);
       reader.onloadend = async () => {
-        const base64Image = reader.result; // "data:image/jpeg;base64,..."
+        const base64Image = reader.result;
 
         const imagesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/camera_images`);
         await addDoc(imagesCollectionRef, {
           image_b64: base64Image,
-          timestamp: serverTimestamp(), // Use server timestamp for consistency
+          timestamp: serverTimestamp(),
           userId: userId,
         });
 
         setMessage('Image saved successfully!');
-        setCapturedImageBlob(null); // Clear captured image after saving
+        setCapturedImageBlob(null);
         setImagePreviewUrl(null);
-        stopCamera(); // Stop camera after saving
+        stopCamera();
       };
       reader.onerror = (error) => {
         console.error("Error reading image file:", error);
@@ -188,7 +175,6 @@ function App() {
     }
   };
 
-  // Delete an image from Firestore
   const deleteImageFromFirestore = async (imageId) => {
     if (!db || !userId) {
       setMessage('Database not ready. Cannot delete.');
@@ -210,7 +196,6 @@ function App() {
     }
   };
 
-  // Stop camera when component unmounts or user navigates away
   useEffect(() => {
     return () => {
       stopCamera();
@@ -249,7 +234,7 @@ function App() {
           ) : (
             <>
               <video ref={videoRef} className="w-full max-w-md rounded-lg shadow-md border-2 border-gray-300" autoPlay playsInline muted></video>
-              <canvas ref={canvasRef} className="hidden"></canvas> {/* Hidden canvas for capturing */}
+              <canvas ref={canvasRef} className="hidden"></canvas>
               <div className="flex space-x-4">
                 <button
                   onClick={capturePhoto}
