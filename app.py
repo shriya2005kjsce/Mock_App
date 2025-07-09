@@ -5,7 +5,7 @@ import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? initialAuthToken : null;
 
 function App() {
   const [db, setDb] = useState(null);
@@ -206,7 +206,7 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-blue-100 to-purple-200 p-4 sm:p-6 font-sans flex flex-col items-center">
       <div className="bg-white rounded-xl shadow-lg p-6 sm:p-8 w-full max-w-2xl">
         <h1 className="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-6">
-          📸 Live Camera Image Storage
+          Live Camera Image Storage
         </h1>
         <p className="text-center text-gray-600 mb-6">
           Capture and store your moments securely in the cloud!
@@ -317,7 +317,7 @@ function App() {
               />
               <div className="p-4 flex-grow flex flex-col justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 mb-2">
+                  <p className="text-sm text-gray-60-0 mb-2">
                     {img.timestamp ? new Date(img.timestamp.toDate()).toLocaleString() : 'Saving...'}
                   </p>
                 </div>
