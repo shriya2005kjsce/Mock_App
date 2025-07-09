@@ -87,7 +87,7 @@ function App() {
     setLoading(true);
     setMessage('Starting camera...');
     try {
-      // Access user's webcam
+      
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
